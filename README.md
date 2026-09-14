@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ledger — Receipt & Statement Intelligence
 
-## Getting Started
+A personal finance tool. Users upload receipt photos and bank statement files
+(CSV/PDF), the app extracts structured transaction data, and users can ask
+plain-English questions about their spending — with answers grounded in their
+real transactions, source records shown, not a hallucinated guess.
 
-First, run the development server:
+Built as a portfolio piece demonstrating a working RAG pipeline end to end.
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Frontend | Next.js (App Router) + TypeScript + Tailwind CSS |
+| Hosting | Vercel (free tier) |
+| Auth | Supabase Auth |
+| Database | Supabase Postgres (`.` free tier, pgvector included) |
+| Vector search | Supabase pgvector |
+| File storage | Supabase Storage |
+| Vision extraction | Gemini API (free tier) |
+| Embeddings | Local `sentence-transformers` model or Gemini embeddings free tier |
+| Q&A generation | Groq (free tier) |
+
+## Setup
+
+Requirements: Node 20+, npm, and free accounts for Supabase, Vercel, Google
+Studio (Gemini), and Groq.
 
 ```bash
+# 1. Install dependencies
+npm install
+
+# 2. Configure environment variables
+cp .env.local.example .env.local
+#   ...then fill in your Supabase URL, anon key, Gemini key, and Groq key.
+#   The service role key is used by server-side code in later phases only.
+
+# 3. Start the dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. Secrets stay in `.env.local` only — never in code,
+never committed.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/          # Routes only (App Router)
+components/   # Shared UI components
+lib/          # supabase clients, embeddings helper, LLM helpers
+types/        # Shared TypeScript types
+prompts/      # Phase-by-phase build kit (see README in that folder)
+```
 
-## Learn More
+The browser and server Supabase clients are intentionally separate files
+(`lib/supabase.ts` vs `lib/supabase-server.ts`) so server-only modules like
+`next/headers` never end up in client bundles.
 
-To learn more about Next.js, take a look at the following resources:
+## Built in phases
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This repo follows a phase-wise build kit in `prompts/`. Each phase file is a
+self-contained prompt for an AI coding tool, run in order:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| # | File | What it builds |
+|---|------|-----------------|
+| 0 | 00-project-brief.md | Shared context (read-only) |
+| 1 | 01-setup-and-architecture.md | Repo scaffold, stack decisions, folder structure |
+| 2 | 02-auth-and-database.md | Supabase auth, schema, row-level security |
+| 3 | 03-ingestion-pipeline.md | Receipt/statement upload + extraction (vision LLM) |
+| 4 | 04-rag-pipeline.md | Embeddings, vector search, grounded Q&A |
+| 5 | 05-dashboard-ui.md | Core app UI — upload, chat, spending views |
+| 6 | 06-admin-panel.md | Admin route, usage stats, role gating |
+| 7 | 07-security-hardening.md | Rate limiting, validation, secrets, RLS audit |
+| 8 | 08-polish-and-deploy.md | Empty/error states, responsive pass, deploy to Vercel |
 
-## Deploy on Vercel
+Current status: see `PROGRESS.md`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## How RAG works here
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+> Architecture diagram placeholder — final phase fills this in.
+
+<!-- The last phase will replace this placeholder with an architecture diagram
+     (Mermaid or image) and a one-paragraph "how RAG works here" explanation. -->
