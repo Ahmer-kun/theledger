@@ -1,7 +1,8 @@
 # Progress — Ledger
 
-Status: **Phase 2 done.** Next up: Phase 3 (ingestion pipeline). Live
-signup/login verification needs your Supabase project — infra checklist below.
+Status: **Phase 2 done — live-verified.** Next up: Phase 3 (ingestion
+pipeline). Migrations + RLS cross-user test ran against the live Supabase
+project; details in the infra checklist below.
 
 ## Phase 1 — Setup & Architecture — DONE
 
@@ -52,11 +53,30 @@ Auth + schema + RLS foundation implemented and compiling.
 ### Infra checklist (for live e2e verification / demo)
 
 1. Create a Supabase project; put URL + anon key in `.env.local`.
-2. Run the 4 migrations in `supabase/migrations/` (SQL Editor).
+2. Run the migrations in `supabase/migrations/` (SQL Editor).
 3. (Optional Google) Dashboard > Authentication > Providers > Google: add
    Client ID/Secret.
 4. Cross-user RLS test, per `SECURITY.md`: two users, confirm A's insert
    is invisible + unwritable by B even via direct Supabase client calls.
+
+### Live verification — DONE (2026-09-15)
+
+- All 5 migrations applied to the live project:
+  `0001` pgvector, `0002` profiles + signup trigger, `0003` receipts,
+  `0004` transaction_embeddings + HNSW,
+  `0005` grant hardening (revokes Supabase default full-DML grants on
+  `profiles`; anon DML + TRUNCATE on tenant tables).
+- Schema confirmed: RLS on all three tables; policies `profiles: own read`,
+  `receipts` + `transaction_embeddings: own full`; `vector` extension;
+  `on_auth_user_created` trigger.
+- Grants after hardening: `profiles` = SELECT-only (anon + authenticated);
+  `receipts`/`transaction_embeddings` = authenticated DML, no anon, no TRUNCATE.
+- Cross-user RLS test ran against live auth + tables (11/11 PASS): profile
+  auto-created on signup with role `user`; A cannot read/update/delete B's
+  receipts, cannot forge a receipt owned by B, cannot self-promote to admin;
+  B cannot read A's profile. Test users cleaned up afterwards.
+- Migrations were applied with a throwaway `pg` runner (not committed);
+  `pg`/`ws` devDependencies removed after use.
 
 ## Roadmap
 
