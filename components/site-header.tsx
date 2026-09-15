@@ -1,6 +1,13 @@
 import Link from "next/link";
+import { createClient } from "@/lib/supabase-server";
+import { signOut } from "@/lib/actions/auth";
 
-export default function SiteHeader() {
+export default async function SiteHeader() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+
   return (
     <header className="border-b border-rule">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
@@ -17,20 +24,36 @@ export default function SiteHeader() {
             Ledger
           </span>
         </Link>
-        <nav aria-label="Account" className="flex items-center gap-3">
-          <Link
-            href="#"
-            className="rounded px-2.5 py-1.5 text-sm text-muted transition-colors hover:text-ink"
-          >
-            Log in
-          </Link>
-          <Link
-            href="#"
-            className="rounded-[6px] bg-accent px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-ink"
-          >
-            Sign up
-          </Link>
-        </nav>
+        {user ? (
+          <div className="flex items-center gap-4">
+            <span className="hidden text-sm text-muted sm:inline">
+              {user.email}
+            </span>
+            <form action={signOut}>
+              <button
+                type="submit"
+                className="rounded px-2.5 py-1.5 text-sm text-muted transition-colors hover:text-ink"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
+        ) : (
+          <nav aria-label="Account" className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="rounded px-2.5 py-1.5 text-sm text-muted transition-colors hover:text-ink"
+            >
+              Log in
+            </Link>
+            <Link
+              href="/signup"
+              className="rounded-[6px] bg-accent px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-ink"
+            >
+              Sign up
+            </Link>
+          </nav>
+        )}
       </div>
     </header>
   );

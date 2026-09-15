@@ -75,6 +75,19 @@ self-contained prompt for an AI coding tool, run in order:
 
 Current status: see `PROGRESS.md`.
 
+## Database setup
+
+Apply the migrations in `supabase/migrations/` to your Supabase project (SQL
+Editor, or `supabase db push` with the Supabase CLI). They create the
+`profiles`, `receipts`, and `transaction_embeddings` tables, enable the
+pgvector extension, and install row-level security (model explained in
+`SECURITY.md`).
+
+Auth providers:
+- Email/password needs no extra setup.
+- Google OAuth: in Supabase Dashboard > Authentication > Providers, enable
+  Google and paste the Client ID + Secret from a Google Cloud OAuth app.
+
 ## How RAG works here
 
 > Architecture diagram placeholder — final phase fills this in.
