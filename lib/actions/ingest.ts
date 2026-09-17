@@ -51,7 +51,10 @@ const DraftRowSchema = z.object({
     const d = new Date(`${s}T00:00:00Z`);
     return !isNaN(d.getTime());
   }, "Enter a valid date"),
-  amount: z.number().finite().positive("Amount must be greater than zero"),
+  amount: z
+    .number()
+    .finite()
+    .refine((a) => a !== 0, "Amount must not be zero"),
   category: z.enum(CATEGORY_TUPLE).nullable(),
   line_items: z
     .array(z.object({ label: z.string(), amount: z.number() }))
@@ -264,7 +267,7 @@ export async function saveExtractions(formData: FormData): Promise<SaveResult> {
     };
   }
 
-  const rows = parsed.data.filter((row) => row.merchant && row.amount > 0);
+  const rows = parsed.data.filter((row) => row.merchant && row.amount !== 0);
   if (rows.length === 0) {
     return { phase: "error", message: "Nothing to save." };
   }

@@ -1,9 +1,8 @@
 # Progress — Ledger
 
-Status: **Phase 3 built (live DoD verification pending).** The ingestion
-pipeline is implemented and migration `0006` is applied + verified live.
-Remaining: add a Gemini key to `.env.local` and run the DoD checks (3+ real
-receipts, a real CSV, a bad/blurry file).
+Status: **Phase 3 done — live-verified.** Ingestion pipeline implemented,
+migration `0006` applied, and live DoD checks passed against real Gemini
+extraction. Next up: Phase 4 (RAG pipeline).
 
 ## Phase 1 — Setup & Architecture — DONE
 
@@ -79,7 +78,7 @@ Auth + schema + RLS foundation implemented and compiling.
 - Migrations were applied with a throwaway `pg` runner (not committed);
   `pg`/`ws` devDependencies removed after use.
 
-## Phase 3 — Ingestion Pipeline — DONE (build) / live DoD pending
+## Phase 3 — Ingestion Pipeline — DONE (live-verified)
 
 Upload → extract → review → save pipeline for receipts and bank statements.
 
@@ -89,7 +88,7 @@ Upload → extract → review → save pipeline for receipts and bank statements
   `user-files/{userId}/{uuid}/{file}` via the user's server session.
 - **Server actions** (`lib/actions/ingest.ts`): `uploadFile`,
   `extractFromStored`, `saveExtractions`.
-- **Extraction** (`lib/gemini.ts`): Gemini 2.5 Flash (vision) with strict
+- **Extraction** (`lib/gemini.ts`): Gemini **3.6 Flash** (vision) with strict
   JSON `responseSchema` for receipts and PDFs; Zod validation of the model
   reply. Low-confidence or unparseable receipts become an **editable review
   draft** — never a silent/confident wrong save. CSV rows parsed directly
@@ -111,14 +110,28 @@ Upload → extract → review → save pipeline for receipts and bank statements
   parser/content-text sanity checks (chase-style CSV, debit/credit columns,
   garbage CSV, bad rows, content text).
 
-### Live DoD checklist (needs GEMINI_API_KEY in `.env.local`)
+### Live DoD — PASSED (`2026`)
 
-1. Add `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`) to `.env.local`.
-2. Sign in, then upload 3+ real receipts of different formats — each must
-   produce a correctly structured saved transaction.
-3. Upload a real CSV statement — must parse multiple rows, category-editable.
-4. Upload a deliberately bad/blurry photo — must produce a reviewable draft,
-   not a crash or a confident wrong save.
+Ran with generated mock files (dot-matrix rendered receipt PNGs, a
+Chase-style CSV, and a seeded blurry "bad" photo) through the real storage,
+Gemini extraction, and save paths as a throwaway user (cleaned up after).
+
+- **3 receipts → high-confidence, complete, matched expected merchants:**
+  BLUEBOTTLE COFFEE ($7.75, 2026-08-14), TRADER JOE'S ($16.40, 2026-08-16),
+  SHELL FUEL STOP ($45.42, 2026-08-10); line items and categories surfaced;
+  saved with `status='saved'`.
+- **Bad photo** (seeded noise, blurred): no crash — model returned
+  `confidence=low` with note "image contains only visual noise", becoming an
+  editable review draft with nothing confidently filled in.
+- **CSV:** 31 rows parsed, the one deliberately bad row skipped and reported
+  as an error, deposit row kept positive; all 31 saved with negative debits
+  preserved.
+- **Storage + tables RLS:** uploads, list, and reads all authorized for the
+  owner only; test objects + user removed after.
+- **Fixes found during verification:** default Gemini model no longer
+  available for new keys → default is now `gemini-3.6-flash`; statement
+  debits (negative amounts) were being rejected/dropped by the save path →
+  amounts now allow any non-zero sign (zero still rejected).
 
 ## Roadmap
 
@@ -127,7 +140,7 @@ Upload → extract → review → save pipeline for receipts and bank statements
 | 0 | 00-project-brief.md | Done (context) |
 | 1 | 01-setup-and-architecture.md | Done |
 | 2 | 02-auth-and-database.md | **Done** |
-| 3 | 03-ingestion-pipeline.md | **Done** (live DoD pending) |
+| 3 | 03-ingestion-pipeline.md | **Done** |
 | 4 | 04-rag-pipeline.md | Pending |
 | 5 | 05-dashboard-ui.md | Pending |
 | 6 | 06-admin-panel.md | Pending |

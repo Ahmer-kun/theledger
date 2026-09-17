@@ -3,7 +3,7 @@ import { GoogleGenerativeAI, SchemaType, type ResponseSchema } from "@google/gen
 import { z } from "zod";
 import { CATEGORIES, type Category, type DraftRow } from "@/types";
 
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
 
 function getClient() {
   const key = process.env.GEMINI_API_KEY;
