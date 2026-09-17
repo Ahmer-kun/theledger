@@ -4,7 +4,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase-server";
-import { buildContentText } from "@/lib/embeddings";
+import { buildContentText, embedTexts } from "@/lib/embeddings";
 import {
   MAX_FILE_SIZE,
   inferFileKind,
@@ -272,22 +272,50 @@ export async function saveExtractions(formData: FormData): Promise<SaveResult> {
     return { phase: "error", message: "Nothing to save." };
   }
 
-  const { error: insertError } = await supabase.from("receipts").insert(
-    rows.map((row) => ({
-      user_id: user.id,
-      merchant: row.merchant,
-      transaction_date: row.transaction_date,
-      amount: row.amount,
-      category: row.category,
-      line_items: row.line_items && row.line_items.length > 0 ? row.line_items : null,
-      raw_file_url: storagePath,
-      source_type: sourceType,
-      status: "saved",
-    })),
-  );
+  const { data: inserted, error: insertError } = await supabase
+    .from("receipts")
+    .insert(
+      rows.map((row) => ({
+        user_id: user.id,
+        merchant: row.merchant,
+        transaction_date: row.transaction_date,
+        amount: row.amount,
+        category: row.category,
+        line_items: row.line_items && row.line_items.length > 0 ? row.line_items : null,
+        raw_file_url: storagePath,
+        source_type: sourceType,
+        status: "saved",
+      })),
+    )
+    .select("id");
 
   if (insertError) {
     return { phase: "error", message: "Saving failed. Try again in a moment." };
+  }
+
+  // Best-effort embeddings: a transient model failure must not break the
+  // save itself; the backfill script covers any rows that missed out.
+  try {
+    const contentTexts = rows.map((row) => buildContentText(row));
+    const embeddings = await embedTexts(contentTexts);
+    const { error: embedInsertError } = await supabase
+      .from("transaction_embeddings")
+      .insert(
+        rows.map((row, i) => ({
+          receipt_id: inserted?.[i]?.id,
+          user_id: user.id,
+          embedding: embeddings[i],
+          content_text: contentTexts[i],
+        })),
+      );
+    if (embedInsertError) {
+      console.error("embedding insert failed:", embedInsertError.message);
+    }
+  } catch (error) {
+    console.error(
+      "embedding generation failed:",
+      error instanceof Error ? error.message : error,
+    );
   }
 
   const first = rows[0];

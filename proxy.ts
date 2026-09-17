@@ -41,7 +41,9 @@ export async function proxy(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const isPublicRoute =
-    PUBLIC_ROUTES.includes(pathname) || pathname.startsWith("/auth/");
+    PUBLIC_ROUTES.includes(pathname) ||
+    pathname.startsWith("/auth/") ||
+    pathname.startsWith("/api/"); // API routes handle their own auth (401 JSON), not redirects.
 
   if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();

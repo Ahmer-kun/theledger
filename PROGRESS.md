@@ -1,8 +1,9 @@
 # Progress — Ledger
 
-Status: **Phase 3 done — live-verified.** Ingestion pipeline implemented,
-migration `0006` applied, and live DoD checks passed against real Gemini
-extraction. Next up: Phase 4 (RAG pipeline).
+Status: **Phase 4 done — live-verified.** RAG pipeline (embeddings + vector
+search under RLS + grounded Groq answers + backfill) implemented, migration
+`0007` applied, and the 10-question eval + RLS-through-RPC check passed 11/11.
+Next up: Phase 5 (dashboard UI).
 
 ## Phase 1 — Setup & Architecture — DONE
 
@@ -133,6 +134,67 @@ Gemini extraction, and save paths as a throwaway user (cleaned up after).
   debits (negative amounts) were being rejected/dropped by the save path →
   amounts now allow any non-zero sign (zero still rejected).
 
+## Phase 4 — RAG Pipeline — DONE (live-verified)
+
+Question → embed → retrieve → grounded answer, all free tier, per-user RLS.
+
+- **Embeddings** (`lib/embeddings.ts`): `embedText` / `embedTexts` via Gemini
+  `gemini-embedding-2` at `outputDimensionality: 768` (matches `vector(768)`).
+  The older `text-embedding-004` is a 404 for these API keys — found live.
+  `buildContentText` now appends receipt `line_items` so item-level questions
+  ("when did I buy the headphones?") match.
+- **Retrieval** (`lib/retrieval.ts`): `retrieveTransactions` embeds the question
+  then calls the `match_transactions` RPC. Structured filters extracted from
+  the question: best-effort **category** (word-boundary keywords only — a
+  substring collision where "headphones" fired the "phone" utility keyword was
+  found and fixed) and **date range** ("past N days/weeks/months", "last
+  month", "this month", explicit months). Comparison phrasings (vs/than/
+  compare/difference) suppress both filters so totals aren't over-narrowed.
+  Optional precomputed `embedding` param lets callers cache per question.
+- **SQL** (`supabase/migrations/0007_rag.sql`, applied): `match_transactions
+  (vector, int, text, date, date)` returns top-k via `1 - (embedding <=> $1)`
+  with optional category/date predicates, `SECURITY INVOKER SET search_path =
+  public` so RLS still scopes every call to the caller; execute granted to
+  `authenticated` only (revoked from public/anon/service_role).
+- **Grounded answers** (`lib/answer.ts`): Groq `/chat/completions` (default
+  `openai/gpt-oss-120b`; `llama-3.3-70b-versatile` retired on Groq) with a
+  strict no-fabrication system prompt — every number must be traceable to a
+  retrieved transaction and cited inline `(merchant, MM/DD/YY, $amount)`.
+  Deterministic short-circuits: 0 hits or top similarity < 0.35 →
+  `"I don't have enough transaction data to answer that."` with no LLM call.
+- **Endpoint** (`app/api/ask/route.ts`): POST, server-session auth, validates
+  question (≤ 500 chars), clamps limit 1–50 (default 30), returns
+  `{ question, answer, sources, filters }`; 400/401/500/503 shapes.
+- **Ingestion hand-off** (`lib/actions/ingest.ts`): `saveExtractions` writes
+  embeddings best-effort per saved row (try/catch — the backfill covers gaps).
+- **Backfill** (`scripts/backfill.mts`, throwaway): fills receipts missing
+  embeddings via `DATABASE_URL`; self-test passed (fresh, resume after a
+  deleted embedding, idempotent). Real run: nothing missing.
+- Verified: lint clean, build clean (`/api/ask` dynamic), migration `0007`
+  applied + verified live (function exists, args correct, security invoker,
+  HNSW index intact, execute → authenticated only).
+
+### Live DoD — wiki `docs/rag-eval-questions.md` (2026-09-17)
+
+Throwaway eval user seeded with **22 known transactions** (Jul/Aug 2026);
+10 realistic questions answered end-to-end (retrieval + grounding), plus a
+cross-user RLS probe:
+
+- **10/10 questions PASS** (or correctly declined): groceries Aug = 109.52;
+  Uber last 3 months = 32.01; subscriptions Aug = Netflix 15.49 + Spotify
+  11.99; Trader Joe's last month = 62.40; headphones purchased 2026-08-18 via
+  line-item text; food & dining Jul = 53.25; Aug−Jul = 196.12 (539.02 vs
+  342.90, all 22 rows cited); biggest purchase = 129.99; gas last month =
+  45.42 ("gas" deliberately not a category keyword — semantic match); flights
+  to Japan → verbatim decline.
+- **RLS through the RPC PASS**: second user's `match_transactions` returns 0
+  rows (0 receipts visible).
+- Every numeric answer cited merchant + date + amount from the dataset; zero
+  fabricated numbers. Two real bugs caught and fixed during the eval:
+  "headphones"→"phone" keyword substring collision; both embedding and Groq
+  default models were retired on this key (204/404).
+- Test users + data cleaned up after each run.
+
 ## Roadmap
 
 | Phase | File | Status |
@@ -141,7 +203,7 @@ Gemini extraction, and save paths as a throwaway user (cleaned up after).
 | 1 | 01-setup-and-architecture.md | Done |
 | 2 | 02-auth-and-database.md | **Done** |
 | 3 | 03-ingestion-pipeline.md | **Done** |
-| 4 | 04-rag-pipeline.md | Pending |
+| 4 | 04-rag-pipeline.md | **Done** |
 | 5 | 05-dashboard-ui.md | Pending |
 | 6 | 06-admin-panel.md | Pending |
 | 7 | 07-security-hardening.md | Pending |
