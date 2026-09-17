@@ -1,29 +1,38 @@
-export type SourceType = "receipt" | "statement";
+export const CATEGORIES = [
+  "Food & Dining",
+  "Groceries",
+  "Transport",
+  "Subscriptions",
+  "Shopping",
+  "Bills & Utilities",
+  "Entertainment",
+  "Other",
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
+
+export type SourceType = "receipt" | "statement_line";
+
+export type ReceiptStatus = "saved" | "needs_review";
 
 export type SourceFormat = "image" | "csv" | "pdf";
 
-export type VerificationStatus = "auto" | "verified" | "flagged";
-
-export interface SourceRecord {
-  id: string;
-  user_id: string;
-  type: SourceType;
-  filename: string;
-  storage_path: string | null;
-  format: SourceFormat;
-  status: VerificationStatus;
-  created_at: string;
+export interface DraftRow {
+  merchant: string;
+  transaction_date: string;
+  amount: number;
+  category: Category | null;
+  line_items: { label: string; amount: number }[] | null;
 }
 
-export interface Transaction {
-  id: string;
-  user_id: string;
-  source_id: string | null;
+export interface StatementRow {
   merchant: string;
-  date: string;
+  transaction_date: string;
   amount: number;
-  category: string | null;
-  description: string | null;
-  embedding: number[] | null;
-  created_at: string;
+  category: Category | null;
+}
+
+export interface ParseError {
+  line: number;
+  reason: string;
 }

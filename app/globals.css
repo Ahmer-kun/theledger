@@ -22,6 +22,10 @@
   outline-offset: 2px;
 }
 
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
