@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-server";
 import { signOut } from "@/lib/actions/auth";
+import SiteNav from "@/components/site-nav";
 
 export default async function SiteHeader() {
   const supabase = await createClient();
@@ -10,8 +11,7 @@ export default async function SiteHeader() {
 
   return (
     <header className="border-b border-rule">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link
+      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">        <Link
           href="/"
           className="flex items-center gap-2"
           aria-label="Ledger home"
@@ -55,6 +55,7 @@ export default async function SiteHeader() {
           </nav>
         )}
       </div>
+      {user ? <SiteNav /> : null}
     </header>
   );
 }

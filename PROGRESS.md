@@ -1,9 +1,8 @@
 # Progress — Ledger
 
-Status: **Phase 4 done — live-verified.** RAG pipeline (embeddings + vector
-search under RLS + grounded Groq answers + backfill) implemented, migration
-`0007` applied, and the 10-question eval + RLS-through-RPC check passed 11/11.
-Next up: Phase 5 (dashboard UI).
+Status: **Phase 5 done — live-verified.** Dashboard UI (dashboard, transactions,
+ask, upload, demo seed) implemented against the "ledger sheet" design and
+smoke-tested end-to-end 24/24. Next up: Phase 6 (admin panel).
 
 ## Phase 1 — Setup & Architecture — DONE
 
@@ -195,6 +194,60 @@ cross-user RLS probe:
   default models were retired on this key (204/404).
 - Test users + data cleaned up after each run.
 
+## Phase 5 — Dashboard UI — DONE (live-verified)
+
+Five screens in the "one ledger sheet" visual identity (design of record:
+`docs/dashboard-design-plan.md`), built on Phase 4's data/RAG layer.
+
+- **Design system** (`app/globals.css` `@theme`): `paper`/`surface`/`ink`/
+  `muted`/`rule`/`accent`/`accent-ink`/`danger` tokens; Fraunces display for
+  page titles, hero month total, and the wordmark; Inter with `tabular-nums`
+  for all data. Global `:focus-visible` and `prefers-reduced-motion` rules.
+  No card grids, no shadows, no entrance animations — a single bordered sheet
+  with internal hairline rules, per the appendix's generic-tell list.
+- **Data layer**: `types/index.ts` (`Receipt`, `LineItem`), `lib/format.ts`
+  (currency/date/month helpers), `lib/queries.ts`
+  (`getDashboardData`, `getRecentReceipts`, `getFilteredReceipts`,
+  `countReceipts`), `lib/actions/transactions.ts` (`updateTransaction`,
+  `deleteTransaction`).
+- **Dashboard** (`app/page.tsx`): month total + comparison sentence, category
+  bars (`components/category-bars.tsx`), spend trend
+  (`components/charts/spend-trend.tsx`, Recharts 3), recent transactions, and
+  an empty state that offers the demo seed.
+- **Transactions** (`app/transactions/page.tsx` +
+  `components/transaction-table.tsx`): GET filter form (q / category / from /
+  to), count + total line, inline edit and two-step delete via server actions.
+- **Ask** (`app/ask/page.tsx` + `components/ask-panel.tsx`): transcript-style
+  panel over `/api/ask`, bold/bullet answer rendering, sources list.
+- **Upload** (`app/upload/page.tsx` + `components/upload-panel.tsx`): the
+  choose → upload → read → review → saved step rule now shown per state.
+- **Demo seed** (`lib/actions/demo.ts`): `loadDemoData()` inserts a 12-merchant,
+  30-row six-month dataset with embeddings; refuses when the account already
+  has receipts; revalidates dashboard/transactions/ask.
+- **Nav** (`components/site-nav.tsx`, `components/site-header.tsx`): active
+  underline, session-aware.
+
+### Live DoD — smoke 24/24 (2026-09-17)
+
+Authenticated HTTP smoke against a fresh `next dev`, using a forged
+`@supabase/ssr` cookie (`sb-<ref>-auth-token` = `base64-` +
+base64url(session JSON)) for two throwaway users, cleaned up after:
+
+- **Demo mode (fresh account)**: empty state shown; demo load seeds 30
+  transactions; dashboard populates; second load refused. 4/4.
+- **Seeded account**: dashboard 200 with month total `$60.00`, comparison
+  sentence, this-month categories and recent transactions; `/transactions` 200
+  with 4-row count + total, merchant filter, category filter, invalid category
+  ignored; `/ask` 200 with example questions; `/upload` 200 with the step
+  rule. 19/19.
+- Anonymous `/` still 307 → `/login`. 1/1.
+- Fixes found: SSR inserts `<!-- -->` between adjacent text nodes (smoke
+  normalizes them); dev-server process trees on Windows need
+  `taskkill /T /F` (a `child.kill()` leaves `next dev` grandchildren holding
+  the port). The one "regression" chased during verification was a bug in the
+  throwaway smoke script's cookie header — not app code.
+- `npm run lint` and `npm run build` clean (9 routes + proxy).
+
 ## Roadmap
 
 | Phase | File | Status |
@@ -204,7 +257,7 @@ cross-user RLS probe:
 | 2 | 02-auth-and-database.md | **Done** |
 | 3 | 03-ingestion-pipeline.md | **Done** |
 | 4 | 04-rag-pipeline.md | **Done** |
-| 5 | 05-dashboard-ui.md | Pending |
+| 5 | 05-dashboard-ui.md | **Done** |
 | 6 | 06-admin-panel.md | Pending |
 | 7 | 07-security-hardening.md | Pending |
 | 8 | 08-polish-and-deploy.md | Pending |

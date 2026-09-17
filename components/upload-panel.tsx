@@ -28,7 +28,50 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 const inputClasses =
-  "mt-0.5 w-full rounded-md border border-rule bg-white px-2.5 py-1.5 text-sm text-ink placeholder:text-muted";
+  "mt-0.5 w-full rounded-md border border-rule bg-surface px-2.5 py-1.5 text-sm text-ink placeholder:text-muted";
+
+const STAGES = ["Choose file", "Upload", "Read", "Review", "Saved"];
+
+const STAGE_OF: Record<Phase, number | null> = {
+  idle: 0,
+  uploading: 1,
+  extracting: 2,
+  review: 3,
+  saving: 3,
+  saved: 4,
+  error: null,
+};
+
+function StageRule({ phase }: { phase: Phase }) {
+  const stage = STAGE_OF[phase];
+  if (stage === null) return null;
+
+  return (
+    <ol aria-label="Progress" className="mb-6 flex gap-1.5">
+      {STAGES.map((label, index) => {
+        const current = index === stage;
+        const done = index < stage;
+        return (
+          <li key={label} className="min-w-0 flex-1">
+            <div
+              className={`h-0.5 rounded-full ${
+                done || current ? "bg-accent" : "bg-rule"
+              }`}
+            />
+            <span
+              aria-current={current ? "step" : undefined}
+              className={`mt-2 truncate text-xs ${
+                current ? "block font-medium text-ink" : "hidden text-muted sm:block"
+              }`}
+            >
+              {label}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export default function UploadPanel() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -158,7 +201,7 @@ export default function UploadPanel() {
         <button
           type="button"
           onClick={reset}
-          className="mt-5 rounded-md border border-rule bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
+          className="mt-5 rounded-md border border-rule bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-paper"
         >
           Start over
         </button>
@@ -169,6 +212,7 @@ export default function UploadPanel() {
   if (phase === "saved") {
     return (
       <div className="rounded-lg border border-rule bg-surface p-6">
+        <StageRule phase={phase} />
         <div className="flex items-center gap-3">
           <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-full bg-accent" />
           <h2 className="font-serif text-2xl text-ink">Saved.</h2>
@@ -195,6 +239,7 @@ export default function UploadPanel() {
   if (phase === "uploading" || phase === "extracting") {
     return (
       <div className="rounded-lg border border-rule bg-surface p-6" role="status">
+        <StageRule phase={phase} />
         <p className="text-sm font-medium text-ink">
           {phase === "uploading" ? "Uploading…" : "Reading your file…"}
         </p>
@@ -215,6 +260,7 @@ export default function UploadPanel() {
     const isReceipt = draft.sourceType === "receipt";
     return (
       <div className="rounded-lg border border-rule bg-surface p-6">
+        <StageRule phase={phase} />
         <h2 className="font-serif text-2xl text-ink">
           {isReceipt ? "Check what we read" : "Check what we parsed"}
         </h2>
@@ -328,7 +374,7 @@ export default function UploadPanel() {
             type="button"
             onClick={reset}
             disabled={isPending}
-            className="rounded-md border border-rule bg-white px-4 py-2 text-sm font-medium text-ink hover:bg-paper disabled:opacity-60"
+            className="rounded-md border border-rule bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-paper disabled:opacity-60"
           >
             Start over
           </button>
@@ -340,6 +386,7 @@ export default function UploadPanel() {
   // idle
   return (
     <div>
+      <StageRule phase={phase} />
       <label
         onDragOver={(e) => {
           e.preventDefault();

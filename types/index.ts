@@ -36,3 +36,21 @@ export interface ParseError {
   line: number;
   reason: string;
 }
+
+export interface LineItem {
+  label: string;
+  amount: number;
+}
+
+/** A saved transaction row (public.receipts). */
+export interface Receipt {
+  id: string;
+  merchant: string;
+  transaction_date: string;
+  amount: number;
+  category: Category | null;
+  line_items: LineItem[] | null;
+  source_type: SourceType;
+  status: ReceiptStatus;
+  created_at: string;
+}
