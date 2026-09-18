@@ -9,7 +9,7 @@ const LINKS = [
   { href: "/ask", label: "Ask" },
 ];
 
-export default function SiteNav() {
+export default function SiteNav({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -32,6 +32,19 @@ export default function SiteNav() {
             </Link>
           );
         })}
+        {isAdmin ? (
+          <Link
+            href="/admin"
+            aria-current={pathname.startsWith("/admin") ? "page" : undefined}
+            className={`-mb-px shrink-0 border-b-2 px-3 py-2.5 text-sm transition-colors ${
+              pathname.startsWith("/admin")
+                ? "border-accent font-medium text-ink"
+                : "border-transparent text-muted hover:text-ink"
+            }`}
+          >
+            Admin
+          </Link>
+        ) : null}
         <Link
           href="/upload"
           className="ml-auto shrink-0 rounded-[6px] px-3 py-1.5 text-sm font-medium text-accent-ink transition-colors hover:bg-accent/10"

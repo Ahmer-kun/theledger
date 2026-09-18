@@ -9,6 +9,22 @@ export default async function SiteHeader() {
     data: { user },
   } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
 
+  let isAdmin = false;
+  if (user) {
+    let role: string | null = null;
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+      role = profile?.role ?? null;
+    } catch {
+      role = null;
+    }
+    isAdmin = role === "admin";
+  }
+
   return (
     <header className="border-b border-rule">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">        <Link
@@ -55,7 +71,7 @@ export default async function SiteHeader() {
           </nav>
         )}
       </div>
-      {user ? <SiteNav /> : null}
+      {user ? <SiteNav isAdmin={isAdmin} /> : null}
     </header>
   );
 }

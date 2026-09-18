@@ -1,8 +1,9 @@
 # Progress — Ledger
 
-Status: **Phase 5 done — live-verified.** Dashboard UI (dashboard, transactions,
-ask, upload, demo seed) implemented against the "ledger sheet" design and
-smoke-tested end-to-end 24/24. Next up: Phase 6 (admin panel).
+Status: **Phase 6 done — live-verified.** Admin panel gated by `profiles.role`
+(server-side route + query level), aggregate-only, authenticated user blocked
+on `/admin` and on the `admin_stats()` RPC directly. Next up: Phase 7
+(security hardening).
 
 ## Phase 1 — Setup & Architecture — DONE
 
@@ -248,6 +249,54 @@ base64url(session JSON)) for two throwaway users, cleaned up after:
   throwaway smoke script's cookie header — not app code.
 - `npm run lint` and `npm run build` clean (9 routes + proxy).
 
+## Phase 6 — Admin Panel — DONE (live-verified)
+
+Gated admin view: server-side role checks at the route AND the query, showing
+only aggregate usage numbers.
+
+- **Migration `0008_admin_stats.sql`** (applied): `admin_stats()` — one
+  `SECURITY DEFINER` function, the only path to cross-user aggregates. It
+  verifies `auth.uid()` has `role='admin'` on `profiles` **inside the
+  function** and raises `admin access required` otherwise; returns JSON with
+  user count + 30-day signup series (`generate_series` with zero-filled days)
+  and receipt count + breakdown by `source_type` + `status`. Grants narrowed
+  to `authenticated` (`revoke all` from public/anon/service_role first).
+- **`lib/admin.ts`**: server-only `getAdminStats(supabase)` + `AdminStats`
+  types; defensively normalizes the PostgREST row shape; returns `null` on
+  any error/non-admin.
+- **`app/admin/page.tsx`**: server component — reads the caller's own
+  `profiles.role` (RLS-scoped) and `redirect("/")` for non-admins, then calls
+  the RPC (defense in depth). Ledger-sheet UI: signed-up users total +
+  signups chart (`components/admin/signups-chart.tsx`), transactions
+  processed total, by-source bars, and an extraction-quality block
+  (% auto-saved vs needs review). A line under the title states the policy:
+  never individual transaction contents.
+- **Nav**: `site-header` fetches own role; `site-nav` shows an Admin link
+  only for admins (active-underline styling, non-admin never sees it).
+- **`SECURITY.md`**: the "Where admins fit" section now documents the
+  implemented model, why aggregate-only, and that promotion is SQL-only.
+- Verified: lint clean, build clean (`/admin` route added). One fix during
+  verification: supabase-js query builders aren't Promises, so `.catch()`
+  doesn't exist on them — role fetch uses try/catch around the awaited call.
+
+### Live DoD — smoke 17/17 (2026-09-17)
+
+Throwaway migration runner (pg, removed after) applied `0008` and drove the
+checks; two throwaway users + one regular user's 4 seeded receipts, all
+deleted after (confirmed: profiles 0, receipts 0):
+
+- Migration applied; `admin_stats()` exists; execute granted to
+  `authenticated`, denied to `anon`. 3/3.
+- SQL promotion: `update profiles set role='admin'` for the test user
+  works (no UI path exists). 1/1.
+- **Regular user blocked at both layers**: `GET /admin` → 307 `/`; direct
+  `admin_stats()` call with the user's own JWT → `admin access required`.
+  2/2.
+- **Admin sees real aggregates**: `/admin` 200 and the page shows exactly the
+  counts read straight from the DB (users total, receipts total, needs-review
+  count, source-type counts all matched). Anonymous `/admin` → 307 `/login`.
+  11/11.
+
 ## Roadmap
 
 | Phase | File | Status |
@@ -258,6 +307,6 @@ base64url(session JSON)) for two throwaway users, cleaned up after:
 | 3 | 03-ingestion-pipeline.md | **Done** |
 | 4 | 04-rag-pipeline.md | **Done** |
 | 5 | 05-dashboard-ui.md | **Done** |
-| 6 | 06-admin-panel.md | Pending |
+| 6 | 06-admin-panel.md | **Done** |
 | 7 | 07-security-hardening.md | Pending |
 | 8 | 08-polish-and-deploy.md | Pending |

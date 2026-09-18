@@ -49,12 +49,29 @@ The `WITH CHECK` clause on write policies does double duty: it blocks a
 client from `UPDATE`-ing an existing row to reassign it to someone else, and
 blocks `INSERT`ing a row for another user.
 
-## Where admins fit (Phase 6 extension point)
+## Where admins fit (Phase 6)
 
-The RLS model for regular users is complete. Admin analytics will be exposed
-only through aggregate endpoints — counts and sums, never another user's raw
-transaction rows — enforced by separate database-level checks, not hidden
-columns in the UI.
+The RLS model for regular users is complete. Admin analytics are exposed only
+through aggregate endpoints — counts and sums, never another user's raw
+transaction rows:
+
+- **`/admin`** is a server component that reads the caller's own `profiles.role`
+  (RLS-scoped) and redirects non-admins. That check is UX; the real gate is
+  the query.
+- **`admin_stats()`** (`supabase/migrations/0008_admin_stats.sql`) is a
+  `SECURITY DEFINER` database function — the *only* path to cross-user
+  aggregates. It verifies `auth.uid()` is an admin **inside the function**
+  before returning anything, so calling it directly with a regular user's JWT
+  (bypassing the UI entirely) returns an `admin access required` error, not
+  data. It returns only aggregate counts.
+- **Promotion to admin is SQL-only.** There is no UI toggle. `profiles.role`
+  has no client write grant, so the only writer is a privileged context
+  (SQL console / service role).
+
+Why aggregate-only: the product needs a high-level view of usage, which can
+be served entirely by counts and rates — and keeping the admin surface
+aggregate-only means there's no code path that can leak another user's
+financial records, so the boundary stays small enough to reason about.
 
 ## How to verify the boundary (do this once, prove it in demos)
 
