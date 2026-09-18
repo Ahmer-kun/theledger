@@ -82,3 +82,123 @@ financial records, so the boundary stays small enough to reason about.
 4. Confirm the app-level redirects never serve user B's data either.
 
 See `supabase/migrations/` for the exact policies.
+
+## Phase 7 hardening — what was tested and confirmed (Sep 2026)
+
+### 1. RLS re-audit with crafted direct-API attempts (live)
+
+Two throwaway users (A, B) plus a session-less `anon` client, hitting the
+Supabase API directly (bypassing the UI) for **every** table and for storage:
+
+- **`receipts`**: B cannot read A's row (0 rows), update it (0 rows matched,
+  A's row survives unmodified), delete it (row survives intact), or **forge**
+  a new row owned by A (INSERT blocked by the `WITH CHECK` clause → error).
+  B sees only their own rows under plain `SELECT`.
+- **`transaction_embeddings`**: B cannot read, update, or delete A's rows —
+  the embedding row survives byte-for-byte after B's update/delete attempts.
+- **`profiles`**: B cannot read A's profile; B (and A) cannot write profiles
+  at all — even updating their **own** `role` to `admin` is a permission
+  error, so client-side admin escalation is impossible end to end.
+- **Storage (`user-files` bucket)**: B cannot upload into, list, or download
+  A's folder. A can upload/download their own. All four storage policies
+  (insert/select/update/delete) are folder-scoped to `auth.uid()`.
+- **Functions**: `match_transactions` (SECURITY INVOKER) returns **zero of
+  A's rows** to B, and is not executable by `anon`. `admin_stats()` (Phase 6)
+  rejects regular users and anon.
+- **Fixes during audit**: a signed-in user's request to `/api/*` was being
+  307-redirected to `/` by the middleware (its "signed-in users hitting
+  public routes go home" branch also matched API routes). API routes are now
+  excluded from that redirect (`proxy.ts`), so `/api/ask` reaches its handler
+  and its own auth/rate-limit logic applies.
+
+Every cross-user attempt above was started after A's data was seeded and the
+attacker (B/anon) had full freedom to pick table, column, and value; all were
+denied. **No migration changes were needed** — the Phase 2/4/5 policies held.
+
+### 2. Rate limiting (`lib/rate-limit.ts`)
+
+Free-tier-friendly **in-memory fixed-window** limiter, keyed per user. Runs
+*before* any LLM call (and before body parsing), so a leaked session can't
+burn the Gemini/Groq budget:
+
+| Limit | Config |
+|---|---|
+| `/api/ask` | 20 requests / 60 s |
+| file upload | 15 / 60 s |
+| extraction (`extractFromStored`) | 10 / 60 s |
+
+429 responses carry `Retry-After` and a generic body. Verified live: a fresh
+user's calls are allowed up to the window budget, then every further request
+returns 429 with `Retry-After` while identical valid calls continue to work
+for a *different* previously-unused user (keys are isolated per user).
+
+> Known limitation: state is per process/warm instance. On Vercel's
+> serverless runtime that means the limit is per-instance, not global. That's
+> the intended first pass — it stops a runaway client or leaked session. If a
+> strict global budget is ever needed, swap the backend for Upstash (free
+> tier) without changing the call sites.
+
+### 3. Content-based file type validation (`lib/file-kind.ts`)
+
+Uploads are no longer trusted on extension / browser MIME alone:
+
+- **Magic-byte sniffing** (`sniffFileKind`): JPEG/PNG/WebP/PDF signatures;
+  anything else must be NUL-free printable text or it's rejected (executables,
+  archives, and other binaries can't pose as `csv`/`image`/`pdf`).
+- **Cross-check** (`reconcileFileKind` + `claimedImageMime`): the declared
+  kind (MIME + extension) must agree with the sniffed kind; for images the
+  specific type must also match (a PNG renamed `.jpg` or declared
+  `image/jpeg` is rejected). A generic `application/octet-stream` or
+  ext-less claim falls back to trusting content.
+- Applied in `uploadFile` *before* anything is written to storage; size is
+  already capped server-side at 8 MB (`next.config.ts` raises the server
+  action body limit to 10 MB to allow that).
+- The exact production decision path is unit-tested: PNG-as-JPG, CSV-as-PNG,
+  renamed PDF, EXE rejection, generic-MIME trust.
+
+### 4. Secrets audit
+
+- `git log --all -- .env.local` → **empty**: `.env.local` has never been
+  committed.
+- `git ls-files ".env*"` → only `.env.local.example` (placeholders, no real
+  values) is tracked.
+- Full-history and working-tree scans for key patterns (`eyJhbGciOi…` JWTs,
+  Gemini `AIza…` keys, Groq `gsk_…` keys, `sk-…`, Postgres URLs with
+  passwords) → **no matches** in any commit or tracked file.
+- Real keys exist only in the gitignored `.env.local` (`git check-ignore`
+  confirms).
+
+### 5. Parameterized input
+
+All user text reaches the database through PostgREST's bound-parameter query
+builder — there is no raw SQL string concatenation anywhere in `lib/`.
+Verified live: a merchant value `Bob'); DROP TABLE receipts;--` and a
+category `Food' OR '1'='1` are stored and round-tripped *literally* (nothing
+executed, table intact, `ilike` filters match only the literal value).
+
+### 6. Client-facing errors never leak internals
+
+`/api/ask` (the only route that returns arbitrary internal dynamics) now logs
+the full error server-side (`console.error`) and returns a fixed generic
+message. During the live audit, a transient provider error produced exactly
+this: the server log carried the stack, the client received no details.
+`uploadFile`/`extractFromStored`/`saveExtractions` already returned curated
+messages. On top of that, embedding fetches get one retry for transient
+connect failures (`lib/embeddings.ts`) so a cold-start `fetch failed` doesn't
+surface as a user-facing 500.
+
+### 7. Response headers
+
+`proxy.ts` adds `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: strict-origin-when-cross-origin`, and a restrictive
+`Permissions-Policy` on every proxied response. (Verified in the live audit.)
+
+### Residual risks
+
+- Per-instance rate limits (see above) and per-LLM free-tier quotas are the
+  cost ceilings; a distributed attacker could still consume budget across
+  many instances. Acceptable for the $0 budget.
+- Redis/CDN-style HTTP caching and a full CSP are out of scope for now; no
+  user data is served from `_next/static` or an image cache.
+- RLS, not app checks, is the security boundary — keep future endpoints
+  behind user-scoped policies (never "SELECT all then filter").

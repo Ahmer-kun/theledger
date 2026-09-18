@@ -1,9 +1,13 @@
 # Progress — Ledger
 
-Status: **Phase 6 done — live-verified.** Admin panel gated by `profiles.role`
-(server-side route + query level), aggregate-only, authenticated user blocked
-on `/admin` and on the `admin_stats()` RPC directly. Next up: Phase 7
-(security hardening).
+Status: **Phase 7 done — live-verified.** Security hardening: RLS re-audited
+with crafted direct-API attempts across every table + storage (all denied),
+per-user rate limiting on `/api/ask` + upload + extraction (live 429 proven),
+content-sniffing file validation (magic bytes + declared-vs-actual cross-check),
+secrets audit (nothing ever committed), parameterized-input proof, generic
+client errors, security headers, and a transient-embedding-retry. One real bug
+found and fixed: signed-in `/api/*` requests were being redirected to `/` by
+the proxy. Next up: Phase 8 (polish and deploy).
 
 ## Phase 1 — Setup & Architecture — DONE
 
@@ -297,6 +301,68 @@ deleted after (confirmed: profiles 0, receipts 0):
   count, source-type counts all matched). Anonymous `/admin` → 307 `/login`.
   11/11.
 
+## Phase 7 — Security Hardening — DONE (live-verified)
+
+DoD met: RLS re-audited for every surface with crafted direct-API attempts,
+basic rate limiting, content-based file type validation, secrets audit,
+parameterized-input proof, and generic client errors. All findings recorded
+in `SECURITY.md`.
+
+- **RLS re-audit (`scripts/__phase7.mjs`, throwaway, 26/26 PASS)**: two
+  throwaway users + session-less anon client hitting Supabase directly for
+  every table and storage. `receipts`: B cannot read/update/delete/forge A's
+  rows (updates and deletes silently affect 0 rows; inserts blocked by
+  `WITH CHECK`). `transaction_embeddings`: same. `profiles`: B cannot read
+  A's; nobody can write profiles — even updating your own `role` to `admin`
+  is a permission error. Storage: B cannot upload/list/download A's folder.
+  RPCs: `match_transactions` returns 0 of A's rows to B and is anon-proof;
+  `admin_stats` rejects regular + anon users. No migration changes needed.
+- **Real bug found & fixed**: the proxy's "signed-in users hitting public
+  routes go home" branch also matched `/api/*`, so authenticated `/api/ask`
+  calls were 307-redirected to `/` (they silently rendered the dashboard).
+  `/api/*` is now excluded from that redirect (`proxy.ts`); API routes do
+  their own auth (401 JSON).
+- **Rate limiting (`lib/rate-limit.ts`)**: in-memory fixed-window, keyed per
+  user, running *before* any LLM call: `/api/ask` 20/min, upload 15/min,
+  extract 10/min. 429 + `Retry-After`. Live HTTP proof (`scripts/__rate.mjs`,
+  throwaway): fresh user allowed up to budget then every further call 429
+  with `Retry-After` + generic body; different user unaffected. (Per-instance
+  state — documented residual risk.)
+- **Content-based file validation (`lib/file-kind.ts`)**: magic-byte sniffing
+  (JPEG/PNG/WebP/PDF, else NUL-free printable text), declared-vs-sniffed
+  reconciliation, and a concrete image-MIME check (`claimedImageMime`) that
+  rejects a PNG renamed `.jpg` / declared `image/jpeg`. Wired into
+  `uploadFile` **before** anything is stored; `extractFromStored` now sends
+  the actual content MIME to Gemini instead of guessing from the filename.
+  Decision path unit-tested (PNG-as-JPG, CSV-as-PNG, renamed PDF, EXE
+  rejection, generic-MIME trust).
+- **Secrets audit (commands recorded)**: `git log --all -- .env.local` empty;
+  only `.env.local.example` (placeholders) tracked; full-history + worktree
+  scans for JWTs/Gemini/Groq/Postgres-password patterns → no matches; real
+  keys only in gitignored `.env.local`.
+- **Parameterized input**: no raw SQL concatenation anywhere; live injection
+  round-trip proved merchant `Bob'); DROP TABLE receipts;--` and category
+  `Food' OR '1'='1` stored literally, table intact, `ilike` matches only the
+  literal.
+- **Errors / resilience**: `/api/ask` logs details server-side, returns a
+  fixed generic message (up to 503-on-config/message-leak removed). One retry
+  for transient embedding connect failures (`lib/embeddings.ts`). Security
+  headers added in `proxy.ts` (`nosniff`, `DENY` frame, strict referrer,
+  restrictive permissions-policy).
+- Verified: lint clean, build clean. All throwaway harnesses deleted.
+
+### Live DoD — checks (2026-09-18)
+
+- RLS/injection suite: **26/26 PASS** (see bullets).
+- Unit suite: **26/26 PASS** (rate-limit behavior incl. window reset + key
+  isolation; sniff + reconcile + claimed-image checks).
+- HTTP suite: **10/10 PASS** — unauth 401, header presence, empty/overlong
+  400, budget respected, 21st-in-window request 429 with `Retry-After` and
+  generic body, 429 persists.
+- One flake diagnosed: first outbound Gemini call after idle timed out
+  (`fetch failed`, 500) → fixed app-side with a single transient retry;
+  re-run clean.
+
 ## Roadmap
 
 | Phase | File | Status |
@@ -308,5 +374,5 @@ deleted after (confirmed: profiles 0, receipts 0):
 | 4 | 04-rag-pipeline.md | **Done** |
 | 5 | 05-dashboard-ui.md | **Done** |
 | 6 | 06-admin-panel.md | **Done** |
-| 7 | 07-security-hardening.md | Pending |
+| 7 | 07-security-hardening.md | **Done** |
 | 8 | 08-polish-and-deploy.md | Pending |

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { retrieveTransactions } from "@/lib/retrieval";
 import { generateAnswer } from "@/lib/answer";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,14 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return Response.json({ error: "You must be signed in." }, { status: 401 });
+  }
+
+  const limited = rateLimit("ask", user.id);
+  if (!limited.ok) {
+    return Response.json(
+      { error: "You're asking a lot right now. Wait a few seconds and try again." },
+      { status: 429, headers: { "Retry-After": String(limited.retryAfterSeconds) } },
+    );
   }
 
   let question: unknown;
@@ -61,11 +70,12 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Something went wrong.";
-    const isConfig = /API_KEY|not configured/.test(message);
+    // Never echo internal failure details (provider responses, key names,
+    // stack traces) to the client — log them and return a clean message.
+    console.error("[/api/ask] failed:", error);
     return Response.json(
-      { error: message },
-      { status: isConfig ? 503 : 500 },
+      { error: "Something went wrong while answering. Try again in a moment." },
+      { status: 500 },
     );
   }
 }

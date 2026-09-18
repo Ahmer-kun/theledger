@@ -3,6 +3,20 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_ROUTES = ["/login", "/signup"];
 
+const SECURITY_HEADERS: Record<string, string> = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+};
+
+function applySecurityHeaders(res: NextResponse): NextResponse {
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    res.headers.set(key, value);
+  }
+  return res;
+}
+
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -40,25 +54,29 @@ export async function proxy(request: NextRequest) {
   }
 
   const pathname = request.nextUrl.pathname;
+  const isApiRoute = pathname.startsWith("/api/");
   const isPublicRoute =
     PUBLIC_ROUTES.includes(pathname) ||
     pathname.startsWith("/auth/") ||
-    pathname.startsWith("/api/"); // API routes handle their own auth (401 JSON), not redirects.
+    isApiRoute; // API routes handle their own auth (401 JSON), not redirects.
 
   if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
+    return applySecurityHeaders(NextResponse.redirect(url));
   }
 
-  if (user && isPublicRoute) {
+  // Signed-in users hitting login/signup get sent home — but never signed-in
+  // users calling an API route: that would 307-ping-pong /api/* off to the
+  // dashboard instead of reaching the route handler.
+  if (user && isPublicRoute && !isApiRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
-    return NextResponse.redirect(url);
+    return applySecurityHeaders(NextResponse.redirect(url));
   }
 
-  return supabaseResponse;
+  return applySecurityHeaders(supabaseResponse);
 }
 
 export const config = {

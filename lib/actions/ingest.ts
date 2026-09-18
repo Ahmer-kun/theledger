@@ -5,10 +5,15 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase-server";
 import { buildContentText, embedTexts } from "@/lib/embeddings";
+import { rateLimit } from "@/lib/rate-limit";
 import {
   MAX_FILE_SIZE,
   inferFileKind,
+  reconcileFileKind,
+  claimedImageMime,
   sanitizeFileName,
+  sniffFileKind,
+  mimeFromBytes,
   parseStatementCsv,
   type FileKind,
 } from "@/lib/ingestion";
@@ -73,6 +78,14 @@ export async function uploadFile(formData: FormData): Promise<UploadFileResult> 
   const { supabase, user } = await requireUser();
   if (!user) return { phase: "error", message: "You must be signed in to upload." };
 
+  const limited = rateLimit("upload", user.id);
+  if (!limited.ok) {
+    return {
+      phase: "error",
+      message: "Too many uploads right now — wait a moment and try again.",
+    };
+  }
+
   const file = formData.get("file");
   if (!(file instanceof File)) {
     return { phase: "error", message: "No file received. Try again." };
@@ -85,19 +98,50 @@ export async function uploadFile(formData: FormData): Promise<UploadFileResult> 
     };
   }
 
-  const kind = inferFileKind(file.type, file.name);
-  if (!kind) {
+  // The size limit above is enforced here, server-side, before anything is
+  // stored — the browser's accept attribute is only a convenience hint.
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  // Trust the file's content, not its extension or declared MIME type: a
+  // non-image renamed to *.png must not slip through to the vision model.
+  const sniffed = sniffFileKind(bytes);
+  const declared = inferFileKind(file.type, file.name);
+  const resolved = reconcileFileKind(declared, sniffed);
+  if (!resolved.ok) {
+    if (resolved.error === "mismatch") {
+      return {
+        phase: "error",
+        message: "That file's contents don't match its name or type. Try a real receipt image, PDF, or CSV.",
+      };
+    }
     return {
       phase: "error",
-      message: "Unsupported file type. Use a JPEG, PNG, or WebP image, or a CSV or PDF.",
+      message: "That file isn't a readable receipt, statement, or CSV.",
     };
+  }
+  const kind = resolved.kind;
+
+  // Kind-level checks pass, but for images the specific type still matters: a
+  // PNG renamed to *.jpg (or sent as image/jpeg) rides in as "image" otherwise.
+  if (kind === "image") {
+    const actualMime = mimeFromBytes(bytes);
+    const claimed = claimedImageMime(file.type, file.name);
+    if (claimed && actualMime && claimed !== actualMime) {
+      return {
+        phase: "error",
+        message: "That file's contents don't match its name or type. Try a real receipt image, PDF, or CSV.",
+      };
+    }
   }
 
   const storagePath = `${user.id}/${randomUUID()}/${sanitizeFileName(file.name)}`;
 
   const { error: uploadError } = await supabase.storage
     .from("user-files")
-    .upload(storagePath, file, { upsert: false });
+    .upload(storagePath, bytes, {
+      upsert: false,
+      contentType: file.type || undefined,
+    });
 
   if (uploadError) {
     // Storage bucket missing — surface a clear, actionable message.
@@ -119,6 +163,14 @@ export async function uploadFile(formData: FormData): Promise<UploadFileResult> 
 export async function extractFromStored(formData: FormData): Promise<ExtractResult> {
   const { supabase, user } = await requireUser();
   if (!user) return { phase: "error", message: "You must be signed in." };
+
+  const limited = rateLimit("extract", user.id);
+  if (!limited.ok) {
+    return {
+      phase: "error",
+      message: "Too many files being read right now — wait a moment and try again.",
+    };
+  }
 
   const storagePath = String(formData.get("storagePath") ?? "");
   const kind = String(formData.get("kind") ?? "") as FileKind;
@@ -182,7 +234,10 @@ export async function extractFromStored(formData: FormData): Promise<ExtractResu
       };
     }
 
-    const { rows, confidence, notes } = await extractFromReceiptImage(base64, fileMime(filename));
+    const { rows, confidence, notes } = await extractFromReceiptImage(
+      base64,
+      mimeFromBytes(new Uint8Array(bytes)) ?? "image/jpeg",
+    );
     const parsed = rows[0];
     const row: DraftRow =
       confidence === "low" || !isComplete(parsed)
@@ -224,13 +279,6 @@ export async function extractFromStored(formData: FormData): Promise<ExtractResu
     }
     return { phase: "error", message: "Extraction failed. Try a clearer file, or try again." };
   }
-}
-
-function fileMime(filename: string): string {
-  const ext = filename.split(".").pop()?.toLowerCase();
-  if (ext === "png") return "image/png";
-  if (ext === "webp") return "image/webp";
-  return "image/jpeg";
 }
 
 function isComplete(row: DraftRow): boolean {

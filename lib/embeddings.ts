@@ -25,6 +25,25 @@ function getClient() {
   return new GoogleGenerativeAI(key);
 }
 
+/**
+ * A transient cold-start connect failure (ECONNRESET / "fetch failed" before
+ * any HTTP response) is common for first outbound calls; retry once.
+ * Biases to false to avoid masking steady-state 4xx/5xx provider errors.
+ */
+function isTransientNetworkError(error: unknown): boolean {
+  return error instanceof Error && /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(error.message);
+}
+
+async function embedWithRetry<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!isTransientNetworkError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return run();
+  }
+}
+
 function embedRequest(
   text: string,
   role: "user" | "model" = "user",
@@ -36,7 +55,7 @@ function embedRequest(
 export async function embedText(text: string): Promise<number[]> {
   const genAI = getClient();
   const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
-  const response = await model.embedContent(embedRequest(text));
+  const response = await embedWithRetry(() => model.embedContent(embedRequest(text)));
   const embedding = response.embedding.values;
   if (embedding.length !== EMBEDDING_DIMENSIONS) {
     throw new Error(
@@ -49,9 +68,11 @@ export async function embedText(text: string): Promise<number[]> {
 export async function embedTexts(texts: string[]): Promise<number[][]> {
   const genAI = getClient();
   const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
-  const response = await model.batchEmbedContents({
-    requests: texts.map((text) => embedRequest(text)),
-  });
+  const response = await embedWithRetry(() =>
+    model.batchEmbedContents({
+      requests: texts.map((text) => embedRequest(text)),
+    }),
+  );
   return response.embeddings.map((e) => e.values);
 }
 

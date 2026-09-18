@@ -4,11 +4,24 @@ import { CATEGORIES, type Category, type StatementRow, type ParseError } from "@
 import {
   MAX_FILE_SIZE,
   inferFileKind,
+  reconcileFileKind,
+  claimedImageMime,
   sanitizeFileName,
+  sniffFileKind,
+  mimeFromBytes,
   type FileKind,
 } from "@/lib/file-kind";
 
-export { MAX_FILE_SIZE, inferFileKind, sanitizeFileName, type FileKind };
+export {
+  MAX_FILE_SIZE,
+  inferFileKind,
+  reconcileFileKind,
+  claimedImageMime,
+  sanitizeFileName,
+  sniffFileKind,
+  mimeFromBytes,
+  type FileKind,
+};
 
 export function parseStatementCsv(csvText: string): {
   rows: StatementRow[];
